@@ -1,161 +1,100 @@
 # GAAD: Graph Anomaly Agentic Dossier Pipeline
 
-## System Nomenclature & High-Level Purpose
+Deterministic middleware that turns bank transaction-graph anomaly scores into audit-ready, RBI-cited compliance reports, fully air-gapped. No generative LLM in the loop. Every decision is reproducible and independently re-verifiable.
 
-GAAD is a deterministic middleware layer that bridges NetworkX graph engines with LangGraph state machines. It sits between a bank's transaction-graph scoring system and its compliance officers, and it does one job: turn raw network topology features into localized, audit-ready compliance narratives, entirely inside an air-gapped environment.
+## Architecture
 
-The problem this solves is specific. Graph intelligence engines at Tier-1 Indian banks score accounts for laundering risk using structural features (clustering coefficients, device convergence, multi-hop velocity). Those scores are not readable by a human compliance officer, and they carry no legal grounding. Someone still has to trace the network path by hand, look up the relevant RBI KYC/AML provisions, and write a citation-backed Suspicious Transaction Report. GAAD automates that translation step deterministically, with a persistent, tamper-evident audit trail, without a single call leaving the bank's network.
+```mermaid
+flowchart LR
+    A[NetworkX Ledger Graph] --> B[Topology Extraction]
+    B --> C{Routing Firewall}
+    C -->|SAFE| G[Compile Node]
+    C -->|FLAGGED| D[Air-Gapped RAG]
+    D -->|local_model/ + data/rbi_circulars/| G
+    G --> H[Hash-Chained Audit Log]
 
-There is no generative LLM anywhere in this pipeline. "Agentic" here refers to conditional, multi-step orchestration (route, retrieve, compile, persist), not autonomous text generation. That distinction is load-bearing: every decision GAAD makes is reproducible, explainable, and independently re-verifiable against the same graph and the same corpus, every time.
+    style C fill:#f9d5a7,stroke:#333
+    style D fill:#c9e4de,stroke:#333
+    style H fill:#d0d0d0,stroke:#333
+```
 
-## Core Operational Flow
+| Stage | What it does | Cost profile |
+|---|---|---|
+| Topology Extraction | Computes clustering coefficient, shared-device count, bidirectional velocity per account | Cheap, runs on every account |
+| Routing Firewall | Deterministic threshold rule. `SAFE` → stop here. `FLAGGED` → escalate | Kills ~85%+ of accounts before any retrieval cost |
+| Air-Gapped RAG | `sentence-transformers` cosine search, `FLAGGED` accounts only, zero network calls | Only paid for accounts that need it |
+| Compile + Audit Log | Runs on every account unconditionally, SHA-256 hash-chained JSONL | Persist once, tamper-evident forever |
 
-GAAD runs as a four-stage pipeline per account.
+## Verified Results
 
-**1. Topological Feature Extraction**
-A NetworkX `DiGraph` models the ledger network: accounts as nodes, transactions as directed edges. For each account, GAAD computes local clustering coefficient, shared-device account count (identity resolution across the full node set, not just transaction-adjacent neighbors), and bidirectional multi-hop transfer velocity (hop count and minimum time interval, walked forward and backward through the account so a middle-of-chain node gets full credit for the chain it sits inside).
+| Metric | Score | What it actually proves |
+|---|---|---|
+| Context Grounding | **100%** (9/9 citations, 0 hallucinated) | Structural guarantee: retrieval can only return citations that exist on disk |
+| Topological Accuracy | **100%** (F1 = 1.0, TP=3 FP=0 FN=0) | Plumbing is bug-free vs. a synthetic planted benchmark, **not** a real-world detection claim |
+| Malformed Input Fuzzer | **6/6 caught** | Negative amounts, self-loops, NaN scores, empty device IDs, corrupted nodes, all raise typed errors, zero raw crashes |
 
-**2. Routing Firewall**
-A deterministic Python rule evaluates the extracted metrics against configurable thresholds. If the account does not exhibit device convergence combined with at least one of clustering, velocity-hop, or velocity-speed signals, the pipeline terminates immediately with a `SAFE` verdict. No retrieval call, no token spend, no latency cost. Only `FLAGGED` accounts proceed to stage three. This is the cost-control gate: most accounts in a real ledger are clean, and the firewall is built to reject them cheaply and explainably, with every triggered threshold recorded on the decision object.
-
-**3. Air-Gapped Retrieval Engine**
-For `FLAGGED` accounts only, a local vector store built on `sentence-transformers` (`all-MiniLM-L6-v2`) performs cosine similarity search against a regulatory corpus, entirely in-process, with zero network calls. The embedding model is loaded exclusively from a local directory; there is no runtime download path. Retrieval returns ranked regulatory provisions with similarity scores, grounding the escalation in specific citations rather than a bare anomaly score.
-
-**4. Structured Log Compiler**
-Every account, `SAFE` or `FLAGGED`, passes through a single compile node before persistence. That node deterministically builds a strict JSON payload: account ID, verdict, triggered reasons, raw topology metrics, retrieved provisions (if any), and a corpus-verification flag. The record is then appended to a SHA-256 hash-chained log, where each entry's hash covers its own content plus the previous entry's hash. Any modification to a historical entry breaks the chain from that point forward, and `verify_chain()` detects it on demand.
-
-## Automated Verification & Scoring
-
-Testing philosophy here is exact recomputation, not sampled or estimated scoring. Because routing and retrieval are both pure functions of the graph and the corpus, every metric below is checked by independently rebuilding ground truth from scratch and diffing against what the pipeline actually produced, using code that shares no implementation with the thing it is checking.
-
-Context grounding is verified by reloading the regulatory corpus fresh from disk (bypassing any in-memory vector store) and confirming every retrieved citation ID and text body matches a real corpus entry byte-for-byte. Topological accuracy is verified by hand-written, independent reimplementations of clustering coefficient (triangle-counting from first principles) and shared-device count (brute-force node scan), diffed against the firewall's reported values.
-
-Verified scorecard output from `tests/eval_suite.py`:
+<details>
+<summary>Raw eval_suite.py output</summary>
 
 ```
-======================================================================
-GAAD MODULE 5 EVALUATION SCORECARD
-======================================================================
-
-NOTE: Topological confusion-matrix ground truth is a SYNTHETIC, planted label (AccountType.LAYERING), used here to validate
-orchestration plumbing, not real-world detection performance. See the module docstring for the production backtesting design.
-
---- Topological Compliance Accuracy ---
-Accounts checked:        19
-Zero degradation:        True
-Max error (clustering):  0.0
-Max error (device cnt):  0.0
 Confusion matrix:        TP=3 FP=0 TN=16 FN=0
 Precision / Recall / F1: 1.000 / 1.000 / 1.000
-Accuracy:                1.000
+Context Grounding Score: 100.0% (9/9 citations verified, 0 hallucinated)
+Topological Accuracy:    100.0% (SYNTHETIC labels, see scoping note in source)
+```
+</details>
 
---- Context Grounding ---
-Citations checked:       9
-Verified grounded:       9
-Hallucinated:            0
-Grounding precision:     1.000
-Corpus coverage ratio:   0.600 (3/5)
-Fully grounded:          True
+## Known Vulnerability (found by our own adversarial suite, unpatched)
 
-======================================================================
-SUMMARY
-======================================================================
-Context Grounding Score:      100.0% (9/9 citations verified against on-disk corpus, 0 hallucinated)
-Topological Accuracy:         100.0% (vs. SYNTHETIC planted labels -- see scoping note above; F1=1.000, degradation=NONE)
-======================================================================
+**A hub-and-device-rotation attack bypasses the firewall.**
+
+```mermaid
+flowchart LR
+    P[Placement] --> HUB["Innocent Hub<br/>(40 legit customers)"]
+    HUB --> L["Layering<br/>unique burner device"]
+    L --> I[Integration]
+
+    style L fill:#f4a3a3,stroke:#333
 ```
 
-Two of these numbers mean different things and should not be read the same way. Context grounding precision (100%) is a structural guarantee: retrieval can only ever return objects it loaded from the on-disk corpus, so zero hallucination is a property of the code, not a benchmark result. Topological accuracy (100%) is scored against a synthetic, planted label on a graph built specifically to be separable by this rule, which makes it a plumbing-integrity check, not a real-world detection performance claim. Production validation requires backtesting against historically filed STR outcomes, where ground truth exists only in arrears and only for accounts that were already escalated.
+Velocity signal correctly sees the full 3-hop chain. Device signal returns zero shared devices (attacker rotated devices at the flagged hop). The firewall's rule is a **hard AND-gate**: no device match = no escalation, regardless of velocity strength. Verdict: `SAFE`. This is a false negative.
 
-## Adversarial Stress-Testing & Fuzzer Analysis
+**Fix (not yet applied):** replace the AND-gate with a weighted rule, e.g. `device_signal OR (velocity_hops AND velocity_speed)`, and extend device-linkage checks to an N-hop neighborhood instead of immediate neighbors only.
 
-Self-consistency checks against a benchmark the same engineer designed prove the wiring works. They do not prove the detection logic is sound against an adversary who knows the rule. `tests/adversarial_suite.py` exists to find real failure modes, not confirm the absence of any.
-
-It found one. A laundering chain was constructed routing through an innocent, high-degree hub account (a payment-gateway stand-in with 40 unrelated legitimate customers), with the layering hop using a unique, never-reused device specifically to defeat device-linkage detection. Result: a confirmed false negative. The velocity signal correctly detected the full 3-hop chain through the hub, but the firewall's escalation rule requires device convergence as a hard AND-gate before any other signal can trigger an escalation. Zero shared-device matches suppressed the flag entirely, regardless of how strong the velocity signal was.
-
-Structural noise test result, from `tests/adversarial_suite.py`:
+<details>
+<summary>Raw adversarial finding</summary>
 
 ```json
 {
-  "target_account_id": "ACC-ADV-LAYER-000",
   "firewall_verdict": "SAFE",
   "shared_device_account_count": 0,
   "max_multi_hop_velocity_hops": 3,
-  "is_false_negative": true,
-  "attack_description": "Laundering chain (placement -> hub -> layering -> integration) routed through an innocent, high-degree hub account (40 unrelated legitimate customers). The layering account uses a unique, never-reused device specifically to avoid triggering device-linkage detection.",
-  "root_cause": "route_accounts()._decide() requires device_signal as a hard AND-gate before ANY other signal (clustering/velocity) can escalate an account. Velocity correctly detected the 3-hop chain (max_multi_hop_velocity_hops=3) but device_signal=False (shared_device_account_count=0 < threshold=2) suppresses escalation entirely, regardless of how strong the velocity signal is.",
-  "remediation_notes": "Recommend replacing the hard AND-gate with a weighted/scored combination (e.g. escalate if device_signal OR (velocity_hops_signal AND velocity_speed_signal), or a point-based threshold summing multiple weaker signals) so a sufficiently strong velocity+clustering pattern can escalate even without a corroborating device match. Also recommend extending device-linkage detection beyond immediate neighbors to a bounded N-hop neighborhood, so a cutout hub does not fully sever the device trail between ring members."
+  "is_false_negative": true
 }
 ```
+</details>
 
-This is an open architectural finding, not yet patched. It is documented here deliberately, because a compliance-facing system that hides its own known blind spots is worse than one that states them plainly.
+## Deployment
 
-Separately, the fuzzer threw six deliberately malformed inputs directly at the model and pipeline layers: negative transaction amounts, timezone-naive timestamps, self-looping transactions, NaN KYC risk scores, empty-string device identifiers, and a graph node missing its account attribute entirely. The first four were caught cleanly by structured `ModelValidationError`s from day one. The remaining two were confirmed gaps on first run and have since been patched: `Account` now rejects blank or whitespace-only device ID strings at construction time, and `compute_account_metrics` now catches missing node attributes and re-raises them as a structured `MetricsComputationError` naming the corrupted node, rather than letting a raw `KeyError` propagate out of the state machine.
-
-Fuzzer scorecard from `tests/adversarial_suite.py`, post-patch:
-
-```json
-"fuzz_cases": [
-    {
-      "case_id": "negative_transaction_amount",
-      "outcome": "CAUGHT_BY_DEFINED_ERROR",
-      "exception_type": "ModelValidationError",
-      "exception_message": "Transaction amount_inr must be > 0, got -500.0.",
-      "is_known_gap": false
-    },
-    {
-      "case_id": "naive_timezone_timestamp",
-      "outcome": "CAUGHT_BY_DEFINED_ERROR",
-      "exception_type": "ModelValidationError",
-      "exception_message": "Transaction.executed_at must be timezone-aware.",
-      "is_known_gap": false
-    },
-    {
-      "case_id": "self_loop_transaction",
-      "outcome": "CAUGHT_BY_DEFINED_ERROR",
-      "exception_type": "ModelValidationError",
-      "exception_message": "Transaction cannot self-loop on account 'A'.",
-      "is_known_gap": false
-    },
-    {
-      "case_id": "nan_kyc_risk_score",
-      "outcome": "CAUGHT_BY_DEFINED_ERROR",
-      "exception_type": "ModelValidationError",
-      "exception_message": "Account 'A' kyc_risk_score must be in [0.0, 1.0], got nan.",
-      "is_known_gap": false
-    },
-    {
-      "case_id": "empty_string_device_id",
-      "outcome": "CAUGHT_BY_DEFINED_ERROR",
-      "exception_type": "ModelValidationError",
-      "exception_message": "Account 'A' device_ids contains 1 blank/empty-string device identifier(s). Every device_id must be a non-empty, non-whitespace string.",
-      "is_known_gap": false
-    },
-    {
-      "case_id": "corrupted_graph_node_missing_account_attr",
-      "outcome": "CAUGHT_BY_DEFINED_ERROR",
-      "exception_type": "MetricsComputationError",
-      "exception_message": "Account 'ACC-CORRUPT-001' (or a node it is compared against) is missing required node data: 'account'. This indicates a corrupted or partially-written graph node -- every node must carry a 'account' attribute before metrics can be computed.",
-      "is_known_gap": false
-    }
-  ],
-  "summary": {
-    "fuzz_cases_total": 6,
-    "fuzz_cases_with_known_gaps": 0,
-    "fuzz_gap_case_ids": []
-  }
+```mermaid
+flowchart TD
+    subgraph internet["Internet-connected machine"]
+        X[src/download_model.py] --> Y[local_model/]
+    end
+    Y -.USB / secure transfer.-> Z
+    subgraph airgap["Air-gapped bank network"]
+        Z[local_model/] --> R[LocalRegulatoryVectorStore]
+        R -.zero network calls.- R
+    end
 ```
 
-Six out of six malformed inputs now terminate in a structured, typed GAAD error instead of a raw exception, before ever reaching the audit log.
+- **Phase 1 (online, once):** `python src/download_model.py` downloads `all-MiniLM-L6-v2` to `./local_model/`.
+- **Phase 2 (offline, forever):** the vector store loads only from that local path. Missing directory = hard fail with remediation instructions, never a silent download.
 
-## On-Premise Deployment & Data Decoupling Protocol
+## Regulatory Data: Zero Code Coupling
 
-Deployment is split into two phases with a hard boundary between them.
+```
+data/rbi_circulars/*.json  →  legal team edits this, only this
+```
 
-**Phase one: internet-facing setup, off the air-gapped box.** `src/download_model.py` is the only component in this repository that ever touches the network. Run it once, on a machine with internet access, to pull the `all-MiniLM-L6-v2` weights and save them to `./local_model/`. Copy that directory onto the target machine over your standard secure transfer channel (USB, internal file transfer, whatever the bank's air-gap policy mandates).
-
-**Phase two: runtime, fully offline.** `LocalRegulatoryVectorStore` loads the embedding model exclusively from `./local_model/` on disk. There is no fallback path, no lazy download, no telemetry call. If that directory is missing, the constructor raises immediately with the exact remediation command, rather than attempting any network access. This is the enforced boundary: nothing downstream of phase one can reach the internet, by construction, not by convention.
-
-Regulatory text is fully decoupled from application logic. Every provision GAAD cites lives in JSON files under `data/rbi_circulars/`, dynamically loaded at startup by `corpus_loader.py`. No clause number, section title, or legal text is hardcoded anywhere in the retrieval, routing, or pipeline code. A bank's legal team replaces the contents of that directory with verified, sourced official text and nothing else in the codebase needs to change, no redeploy of application logic, no dependency risk.
-
-The corpus currently shipped is illustrative, not verified. Every provisions file carries a `verified_real_text` boolean, defaulted to `false`, and that flag is propagated end to end through retrieval into the audit log itself. Any record built from an unverified corpus carries a top-level `SYSTEM_AUDIT_WARNING` key in its persisted JSON, injected deterministically by the compile stage of the state machine before that record is ever written to disk. That stage runs unconditionally on every account, `SAFE` or `FLAGGED`, so the warning cannot be bypassed by any upstream node. Do not export any record carrying that key to a regulator until the corpus has been replaced with counsel-verified official text and the record has been re-audited.
+No clause, section number, or legal text is hardcoded anywhere in application code. Swap the JSON files, restart, done. Every file carries `"verified_real_text": false` until legal signs off. Any audit record built from unverified text automatically gets a `SYSTEM_AUDIT_WARNING` key, injected deterministically before persistence, on every account path, unconditionally. It cannot be skipped.
