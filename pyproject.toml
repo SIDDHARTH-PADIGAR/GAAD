@@ -11,6 +11,7 @@ dependencies = [
     "networkx==3.4.2",
     "sentence-transformers==3.3.1",
     "numpy==2.2.1",
+    "langgraph==0.2.62",
 ]
 
 [tool.setuptools.packages.find]

@@ -11,6 +11,7 @@ from gaad.firewall.router import (
     RoutingDecision,
     RoutingVerdict,
     route_accounts,
+    route_single_account,
 )
 
 __all__ = [
@@ -20,4 +21,5 @@ __all__ = [
     "RoutingDecision",
     "RoutingVerdict",
     "route_accounts",
+    "route_single_account",
 ]

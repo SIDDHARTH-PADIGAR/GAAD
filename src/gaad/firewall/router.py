@@ -185,3 +185,27 @@ def route_accounts(
         decisions[account_id] = _decide(metrics, active_thresholds)
 
     return decisions
+
+def route_single_account(
+    graph: nx.DiGraph,
+    account_id: str,
+    *,
+    thresholds: FirewallThresholds | None = None,
+    velocity_window_minutes: int = 120,
+    max_hops_checked: int = 6,
+) -> RoutingDecision:
+    """Routes exactly one account without scanning the whole graph.
+
+    Equivalent to route_accounts(graph, ...)[account_id], but avoids
+    computing metrics for every node when the caller (e.g. the
+    Module 4 pipeline) only needs a decision for one account at a time.
+    """
+
+    active_thresholds = thresholds if thresholds is not None else FirewallThresholds()
+    metrics = compute_account_metrics(
+        graph,
+        account_id,
+        velocity_window_minutes=velocity_window_minutes,
+        max_hops_checked=max_hops_checked,
+    )
+    return _decide(metrics, active_thresholds)
