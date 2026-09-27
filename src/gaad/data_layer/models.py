@@ -92,6 +92,14 @@ class Account:
             raise ModelValidationError(
                 f"Account '{self.account_id}' must have at least one device_id."
             )
+        blank_device_ids = [d for d in self.device_ids if not d or not d.strip()]
+        if blank_device_ids:
+            raise ModelValidationError(
+                f"Account '{self.account_id}' device_ids contains "
+                f"{len(blank_device_ids)} blank/empty-string device "
+                "identifier(s). Every device_id must be a non-empty, "
+                "non-whitespace string."
+            )
 
 
 @dataclass(frozen=True, slots=True)

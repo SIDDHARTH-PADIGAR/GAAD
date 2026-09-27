@@ -205,11 +205,14 @@ def _run_structural_noise_test() -> StructuralNoiseFinding:
         root_cause=(
             "route_accounts()._decide() requires device_signal as a hard "
             "AND-gate before ANY other signal (clustering/velocity) can "
-            "escalate an account. Velocity correctly detected the 2-hop "
-            "chain (max_multi_hop_velocity_hops=2) but device_signal=False "
-            "(shared_device_account_count=0 < threshold=2) suppresses "
-            "escalation entirely, regardless of how strong the velocity "
-            "signal is."
+            "escalate an account. Velocity correctly detected the "
+            f"{decision.metrics.max_multi_hop_velocity_hops}-hop chain "
+            "(max_multi_hop_velocity_hops="
+            f"{decision.metrics.max_multi_hop_velocity_hops}) but "
+            "device_signal=False (shared_device_account_count="
+            f"{decision.metrics.shared_device_account_count} < threshold=2) "
+            "suppresses escalation entirely, regardless of how strong the "
+            "velocity signal is."
         ),
         remediation_notes=(
             "Recommend replacing the hard AND-gate with a weighted/scored "
@@ -373,7 +376,7 @@ def _run_fuzz_suite() -> list[FuzzCaseResult]:
             "Account constructed with device_ids=frozenset({''}) -- an "
             "empty-string device fingerprint inside an otherwise "
             "non-empty set",
-            expected_outcome="CAUGHT_BY_DEFINED_ERROR",  # what SHOULD happen
+            expected_outcome="CAUGHT_BY_DEFINED_ERROR",
             fn=_fuzz_empty_string_device_id,
         ),
         _execute_fuzz_case(
@@ -471,30 +474,31 @@ def test_fuzz_case_is_caught_by_a_defined_error(case_id: str) -> None:
     )
 
 
-def test_fuzz_case_empty_device_id_is_a_known_gap() -> None:
-    """CANARY: documents a CURRENT validation gap in Account.
+def test_fuzz_case_empty_device_id_is_now_rejected() -> None:
+    """Was a KNOWN GAP; fixed in models.py Account.__post_init__.
 
-    If this test starts failing (outcome != SUCCEEDED_NO_ERROR), Account
-    now validates individual device_id strings -- great, but then update
-    this test's expected_outcome and remove the "known gap" framing.
+    If this starts failing again, someone reverted/weakened the
+    blank-device-id check -- treat that as a regression, not noise.
     """
     results = {r.case_id: r for r in _run_fuzz_suite()}
     result = results["empty_string_device_id"]
-    assert result.outcome == "SUCCEEDED_NO_ERROR"
-    assert result.is_known_gap is True
+    assert result.outcome == "CAUGHT_BY_DEFINED_ERROR"
+    assert result.exception_type == "ModelValidationError"
+    assert result.is_known_gap is False
 
 
-def test_fuzz_case_corrupted_graph_node_is_a_known_gap() -> None:
-    """CANARY: documents that a corrupted graph node currently raises a
-    raw KeyError from inside an async pipeline node, not a structured
-    MetricsComputationError -- meaning it would propagate uncaught out
-    of a real LangGraph .ainvoke() call today.
+def test_fuzz_case_corrupted_graph_node_is_now_rejected() -> None:
+    """Was a KNOWN GAP; fixed in metrics.py compute_account_metrics.
+
+    If this starts failing again (outcome reverts to
+    CAUGHT_BY_UNDEFINED_ERROR / KeyError), the try/except wrapper was
+    removed or bypassed -- treat that as a regression, not noise.
     """
     results = {r.case_id: r for r in _run_fuzz_suite()}
     result = results["corrupted_graph_node_missing_account_attr"]
-    assert result.outcome == "CAUGHT_BY_UNDEFINED_ERROR"
-    assert result.exception_type == "KeyError"
-    assert result.is_known_gap is True
+    assert result.outcome == "CAUGHT_BY_DEFINED_ERROR"
+    assert result.exception_type == "MetricsComputationError"
+    assert result.is_known_gap is False
 
 
 if __name__ == "__main__":

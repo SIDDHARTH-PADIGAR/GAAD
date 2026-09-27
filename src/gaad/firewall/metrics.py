@@ -253,17 +253,25 @@ def compute_account_metrics(
     if max_hops_checked <= 0:
         raise MetricsComputationError("max_hops_checked must be > 0.")
 
-    undirected_view = graph.to_undirected(as_view=True)
-    clustering_coefficient: float = nx.clustering(undirected_view, account_id)
+    try:
+        undirected_view = graph.to_undirected(as_view=True)
+        clustering_coefficient: float = nx.clustering(undirected_view, account_id)
 
-    shared_device_count = _shared_device_account_count(graph, account_id)
+        shared_device_count = _shared_device_account_count(graph, account_id)
 
-    max_hops, min_interval = _max_multi_hop_velocity(
-        graph,
-        account_id,
-        velocity_window_minutes=velocity_window_minutes,
-        max_hops_checked=max_hops_checked,
-    )
+        max_hops, min_interval = _max_multi_hop_velocity(
+            graph,
+            account_id,
+            velocity_window_minutes=velocity_window_minutes,
+            max_hops_checked=max_hops_checked,
+        )
+    except KeyError as exc:
+        raise MetricsComputationError(
+            f"Account '{account_id}' (or a node it is compared against) is "
+            f"missing required node data: {exc}. This indicates a corrupted "
+            "or partially-written graph node -- every node must carry a "
+            f"'{NODE_ATTR_ACCOUNT}' attribute before metrics can be computed."
+        ) from exc
 
     return AccountTopologyMetrics(
         account_id=account_id,
