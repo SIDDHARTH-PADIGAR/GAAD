@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gaad"
+version = "0.1.0"
+description = "Graph Anomaly Agentic Dossier Pipeline"
+requires-python = ">=3.11"
+dependencies = [
+    "networkx==3.4.2",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
