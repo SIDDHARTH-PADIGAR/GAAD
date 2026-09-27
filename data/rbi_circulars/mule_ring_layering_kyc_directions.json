@@ -1,0 +1,36 @@
+{
+  "verified_real_text": false,
+  "source_note": "ILLUSTRATIVE MOCK CONTENT ONLY. Not verified RBI text. Replace this file's contents with sourced, verified RBI Master Direction text before any production/audit use.",
+  "provisions": [
+    {
+      "citation_id": "RBI/MD-KYC/ILLUSTRATIVE-4(2)(a)",
+      "title": "Customer Due Diligence for Networked Mule Accounts",
+      "text": "Regulated Entities shall apply enhanced due diligence where multiple accounts are found to be accessed through a common mobile device identifier or common IP-linked session token, irrespective of whether the accounts are held by the same customer. Such device-convergence, when combined with rapid inter-account fund movement, shall be treated as an indicator of a networked mule arrangement requiring escalation to the Principal Officer.",
+      "keywords": ["device convergence", "mule account", "enhanced due diligence", "shared device"]
+    },
+    {
+      "citation_id": "RBI/MD-KYC/ILLUSTRATIVE-6(1)",
+      "title": "Layering Typology: Rapid Multi-Hop Fund Transfers",
+      "text": "Where funds credited to an account are debited to one or more other accounts within a short interval, and this pattern repeats across two or more hops within a rolling window, Regulated Entities shall classify the transaction chain as exhibiting layering characteristics. The absence of any apparent legitimate business rationale for the intermediate account's participation shall further elevate the risk classification.",
+      "keywords": ["layering", "velocity", "multi-hop", "fund transfer", "rapid movement"]
+    },
+    {
+      "citation_id": "RBI/MD-KYC/ILLUSTRATIVE-6(3)",
+      "title": "Convergence and Divergence Patterns (Placement-Layering-Integration)",
+      "text": "A structural pattern in which funds from several distinct source accounts converge upon a small set of intermediate accounts, which in turn disperse those funds to a small set of destination accounts, shall be treated as consistent with a placement-layering-integration typology and warrants filing of a Suspicious Transaction Report irrespective of individual transaction value.",
+      "keywords": ["placement", "layering", "integration", "fan-in", "fan-out", "convergence"]
+    },
+    {
+      "citation_id": "RBI/MD-KYC/ILLUSTRATIVE-9(4)",
+      "title": "Suspicious Transaction Report Filing Timelines",
+      "text": "Upon internal escalation of a transaction or account pattern under this Direction, the Principal Officer shall ensure that a Suspicious Transaction Report is filed with the Financial Intelligence Unit within the timeline prescribed under applicable law, and that the structural basis for escalation, including any automated or systems-generated indicators relied upon, is retained as part of the audit trail.",
+      "keywords": ["STR", "filing timeline", "principal officer", "audit trail", "suspicious transaction report"]
+    },
+    {
+      "citation_id": "RBI/MD-KYC/ILLUSTRATIVE-4(5)",
+      "title": "Risk Categorization of Newly Opened Accounts with Shared Identifiers",
+      "text": "Accounts opened in close temporal proximity that share a device identifier, registered mobile number, or beneficial ownership indicator with an existing high-risk account shall be assigned a risk category no lower than that of the existing account, pending independent verification.",
+      "keywords": ["risk categorization", "shared identifier", "beneficial ownership", "device", "new account"]
+    }
+  ]
+}

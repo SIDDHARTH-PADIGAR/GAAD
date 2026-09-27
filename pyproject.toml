@@ -9,6 +9,8 @@ description = "Graph Anomaly Agentic Dossier Pipeline"
 requires-python = ">=3.11"
 dependencies = [
     "networkx==3.4.2",
+    "sentence-transformers==3.3.1",
+    "numpy==2.2.1",
 ]
 
 [tool.setuptools.packages.find]
