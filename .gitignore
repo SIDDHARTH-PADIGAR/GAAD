@@ -6,3 +6,4 @@ __pycache__/
 audit_logs/
 *.db
 .env
+local_model/
