@@ -7,6 +7,75 @@ scorecard for manual/audit review.
 Grounding tests require the local embedding model (./local_model/);
 they auto-skip otherwise. Topology tests are pure graph math and
 always run.
+
+============================================================================
+IMPORTANT SCOPING NOTE -- SYNTHETIC GROUND TRUTH VS. PRODUCTION VALIDATION
+============================================================================
+The confusion matrix (precision/recall/F1/accuracy) computed here treats
+AccountType.LAYERING -- a label WE planted when we wrote
+build_mule_ring_layering_graph() -- as ground truth for "should this
+account have been flagged."
+
+This is a legitimate check that the ORCHESTRATION PLUMBING works
+end-to-end (firewall metrics -> thresholds -> verdict -> eval scoring
+all agree with each other), but it is NOT a measurement of real-world
+detection performance, and a perfect score here should NOT be read as
+"the firewall is a good mule-ring detector." It largely can't be
+otherwise: the same engineer wrote the graph generator, the threshold
+rule, AND this eval, so all three agree by construction on the one
+synthetic topology we've exercised. There is no learned model here to
+overfit in the ML sense -- route_accounts() is a fixed, hand-written
+rule with no training step -- but the SAME structural risk shows up as
+circularity: a rule tuned against a benchmark it also defines will
+look better than it is.
+
+In a live bank deployment there is NO oracle label at account-open
+time. AccountType simply does not exist as a field on a real ledger.
+The production swap is:
+
+    SYNTHETIC (this module)              PRODUCTION (future work)
+    ------------------------              ------------------------
+    AccountType.LAYERING             ->   Outcome of a HUMAN COMPLIANCE
+    (planted at graph-generation           OFFICER'S REVIEW, recorded
+    time, known immediately)               weeks/months later: did this
+                                            account's escalation result
+                                            in an STR actually being
+                                            filed with the FIU?
+
+    Ground truth is available         ->   Ground truth is available
+    instantly, for every account           only in ARREARS, and only
+                                            for accounts that were
+                                            ALREADY escalated (no label
+                                            exists for accounts the
+                                            firewall never surfaced --
+                                            a structural class-imbalance
+                                            and censoring problem this
+                                            synthetic eval has no
+                                            reason to encounter)
+
+    One fixed topology, generated      ->   A backtesting dataset built
+    to be cleanly separable                 from real historical
+                                            transaction/case data,
+                                            almost certainly NOT cleanly
+                                            separable by a simple
+                                            threshold rule
+
+    Precision/recall computed          ->   Precision/recall computed
+    once, deterministically                 per time window, monitored
+                                            for drift as typologies
+                                            evolve and mules adapt to
+                                            known detection rules
+
+Swapping to that production scheme means replacing
+`_ground_truth_label()` below with a lookup against a real STR
+disposition table (e.g. a case-management system export keyed by
+account_id), and treating any account with NO recorded disposition
+as "unlabeled" rather than forcing it into SAFE/FLAGGED -- which in
+turn means the confusion matrix formula itself would need to support
+an "unknown" class, not just binary positive/negative. That is a
+materially different evaluation design and is explicitly OUT OF SCOPE
+for this module.
+============================================================================
 """
 
 from __future__ import annotations
@@ -50,6 +119,9 @@ def test_topology_zero_degradation_on_mule_ring_graph() -> None:
 
 
 def test_topology_confusion_matrix_perfect_on_mule_ring_graph() -> None:
+    # NOTE: "perfect" here is a plumbing-integrity check against a
+    # SYNTHETIC, planted label -- see the module-level scoping note
+    # above before reading this as a real-world performance claim.
     g = build_mule_ring_layering_graph(seed=42)
     decisions = route_accounts(g)
     report = evaluate_topological_compliance(g, decisions)
@@ -89,6 +161,12 @@ def test_grounding_zero_hallucinations_across_all_flagged_accounts() -> None:
 
     report = evaluate_context_grounding(retrieval_results)
 
+    # UNLIKE the confusion matrix above, this metric is NOT a synthetic
+    # benchmark artifact. It holds regardless of which corpus or graph
+    # is used, because it is a structural property of retrieval.py
+    # (every returned RegulatoryProvision was itself loaded from disk
+    # by corpus_loader.py -- there is no code path that can invent one).
+    # A future production corpus swap should NOT change this result.
     assert report.is_fully_grounded, (
         f"Hallucinated citations detected: {report.hallucination_details}"
     )
@@ -103,6 +181,12 @@ def _print_scorecard() -> None:
     print("=" * 70)
     print("GAAD MODULE 5 EVALUATION SCORECARD")
     print("=" * 70)
+    print(
+        "\nNOTE: Topological confusion-matrix ground truth is a SYNTHETIC, "
+        "planted label (AccountType.LAYERING), used here to validate\n"
+        "orchestration plumbing, not real-world detection performance. "
+        "See the module docstring for the production backtesting design."
+    )
 
     g = build_mule_ring_layering_graph(seed=42)
     decisions = route_accounts(g)
@@ -120,27 +204,46 @@ def _print_scorecard() -> None:
     print(f"Precision / Recall / F1: {cm.precision:.3f} / {cm.recall:.3f} / {cm.f1_score:.3f}")
     print(f"Accuracy:                {cm.accuracy:.3f}")
 
-    if not LOCAL_MODEL_DIR.is_dir():
+    grounding_report = None
+    if LOCAL_MODEL_DIR.is_dir():
+        store = LocalRegulatoryVectorStore()
+        retrieval_results = [
+            retrieve_regulatory_grounding(decision, store, top_k=3)
+            for decision in decisions.values()
+            if decision.verdict == RoutingVerdict.FLAGGED
+        ]
+        grounding_report = evaluate_context_grounding(retrieval_results)
+
+        print("\n--- Context Grounding ---")
+        print(f"Citations checked:       {grounding_report.total_citations_checked}")
+        print(f"Verified grounded:       {grounding_report.verified_grounded_citations}")
+        print(f"Hallucinated:            {grounding_report.hallucinated_citations}")
+        print(f"Grounding precision:     {grounding_report.grounding_precision:.3f}")
+        print(f"Corpus coverage ratio:   {grounding_report.corpus_coverage_ratio:.3f} "
+              f"({grounding_report.distinct_citation_ids_used}/{grounding_report.corpus_size})")
+        print(f"Fully grounded:          {grounding_report.is_fully_grounded}")
+    else:
         print("\n--- Context Grounding ---")
         print("SKIPPED: local_model/ not found. Run src/download_model.py first.")
-        return
 
-    store = LocalRegulatoryVectorStore()
-    retrieval_results = [
-        retrieve_regulatory_grounding(decision, store, top_k=3)
-        for decision in decisions.values()
-        if decision.verdict == RoutingVerdict.FLAGGED
-    ]
-    ground_report = evaluate_context_grounding(retrieval_results)
-
-    print("\n--- Context Grounding ---")
-    print(f"Citations checked:       {ground_report.total_citations_checked}")
-    print(f"Verified grounded:       {ground_report.verified_grounded_citations}")
-    print(f"Hallucinated:            {ground_report.hallucinated_citations}")
-    print(f"Grounding precision:     {ground_report.grounding_precision:.3f}")
-    print(f"Corpus coverage ratio:   {ground_report.corpus_coverage_ratio:.3f} "
-          f"({ground_report.distinct_citation_ids_used}/{ground_report.corpus_size})")
-    print(f"Fully grounded:          {ground_report.is_fully_grounded}")
+    print("\n" + "=" * 70)
+    print("SUMMARY")
+    print("=" * 70)
+    if grounding_report is not None:
+        print(
+            f"Context Grounding Score:      "
+            f"{grounding_report.grounding_precision * 100:.1f}% "
+            f"({grounding_report.verified_grounded_citations}/"
+            f"{grounding_report.total_citations_checked} citations verified "
+            f"against on-disk corpus, {grounding_report.hallucinated_citations} hallucinated)"
+        )
+    else:
+        print("Context Grounding Score:      N/A (local_model/ not present)")
+    print(
+        f"Topological Accuracy:         {cm.accuracy * 100:.1f}% "
+        f"(vs. SYNTHETIC planted labels -- see scoping note above; "
+        f"F1={cm.f1_score:.3f}, degradation={'NONE' if topo_report.has_zero_degradation else 'DETECTED'})"
+    )
     print("=" * 70)
 
 
